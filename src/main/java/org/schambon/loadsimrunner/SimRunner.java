@@ -103,6 +103,11 @@ public class SimRunner {
                 LOGGER.warn("Interrupted", e);
             }
             reporter.computeReport(reporterCallbacks);
+
+            if (!workloads.isEmpty() && workloads.stream().allMatch(WorkloadManager::isFinished)) {
+                LOGGER.info("All workloads have completed. Exiting.");
+                System.exit(0);
+            }
         }
     }
 
