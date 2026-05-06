@@ -47,10 +47,10 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: [actions/checkout](https://github.com)@v4
+      uses: actions/checkout@v4
 
     - name: Set up JDK
-      uses: [actions/setup-java](https://github.com)@v4
+      uses: actions/setup-java@v4
       with:
         java-version: '17'
         distribution: 'temurin'
@@ -60,7 +60,7 @@ jobs:
       run: mvn clean package -DskipTests
 
     - name: Create GitHub Release
-      uses: [softprops/action-gh-release](https://github.com)@v2
+      uses: softprops/action-gh-release@v2
       with:
         files: target/*.jar
       env:
