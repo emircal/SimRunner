@@ -62,6 +62,6 @@ jobs:
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
-        files: target/*.jar
+        files: bin/*.jar
       env:
         GITHUB_TOKEN: ${{ github.token }}
