@@ -1,5 +1,6 @@
 package org.schambon.loadsimrunner;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -55,6 +56,8 @@ public class WorkloadManager {
     private TemplateManager templateConfig;
 
     private MongoClient client;
+
+    private final List<Thread> workerThreads = new ArrayList<>();
 
     public static List<WorkloadManager> newInstances(Document config, Map<String, List<TemplateManager>> templatesByBaseName, Reporter reporter) {
         var templateBaseName = config.getString("template");
@@ -167,8 +170,18 @@ public class WorkloadManager {
 
         for (var i = 0; i < threads; i++) {
             Thread thread = new WorkloadThread(name, i, getRunnable());
+            workerThreads.add(thread);
             thread.start();
         }
+    }
+
+    /**
+     * Returns true when every worker thread for this workload has finished.
+     * A workload with no threads (not yet started) is not considered finished.
+     */
+    public boolean isFinished() {
+        if (workerThreads.isEmpty()) return false;
+        return workerThreads.stream().noneMatch(Thread::isAlive);
     }
 
     private Runnable getRunnable() {
