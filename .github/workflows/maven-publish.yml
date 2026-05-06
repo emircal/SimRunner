@@ -32,7 +32,6 @@
 #       run: mvn deploy -s $GITHUB_WORKSPACE/settings.xml
 #       env:
 #         GITHUB_TOKEN: ${{ github.token }}
-
 name: Maven JAR Release
 
 on:
@@ -47,22 +46,22 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout Code
-        uses: [actions/checkout](https://github.com)@v4
+    - name: Checkout Code
+      uses: [actions/checkout](https://github.com)@v4
 
-      - name: Set up JDK
-        uses: [actions/setup-java](https://github.com)@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: 'maven'
+    - name: Set up JDK
+      uses: [actions/setup-java](https://github.com)@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: 'maven'
 
-      - name: Build with Maven
-        run: mvn clean package -DskipTests
+    - name: Build with Maven
+      run: mvn clean package -DskipTests
 
-      - name: Create GitHub Release
-        uses: [softprops/action-gh-release](https://github.com)@v2
-        with:
-          files: target/*.jar
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+    - name: Create GitHub Release
+      uses: [softprops/action-gh-release](https://github.com)@v2
+      with:
+        files: target/*.jar
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
