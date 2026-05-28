@@ -361,13 +361,17 @@ Then you can use the following in workloads:
 
 With this, you are guaranteed that `#top_bottom` will be resolved to the value of an actual `bottom` field.
 
-For more control, you can use the following long form: `"remember": [ {"field": "x", "compound": ["x", "y"], "name": "name", "preload": true, "number": 10000, "capped": 100} ]`. This long form provides the following features:
+For more control, you can use the following long form: `"remember": [ {"field": "x", "compound": ["x", "y"], "name": "name", "preload": true, "number": 10000, "capped": 100, "preloadMode": "scan", "preloadUnique": true} ]`. This long form provides the following features:
 - `field`: field name or field path, like simply listing in `remember`
 - `compound`: instead of managing a single field, generate a document by compounding several fields. For example, `"compound": [ "x", "y.z" ]` will remember a value of the form `{"x": ..., "y_z": ...}`. The behaviour is the same as for the simple syntax: paths are descended and dots (.) are replaced with underscores (_) in field names. If `compound` is present, `field` is ignored.
 - `name`: this is the name of the value library, which will be used in queries. By default, it is the same as `field` with dots replaced by underscores. If using `compound`, it is mandatory to specify a name.
 - `preload`: should we load values from the existing collection at startup (default: true)?
-- `number`: how many distinct values should we preload from the existing collection at startup (default: one million)?
-- `capped`: the dictionary will only contained the last _n_ values inserted
+- `number`: how many distinct values should we preload from the existing collection at startup (default: one million)? When `preloadMode` is `"sample"`, this also controls the number of documents sampled from the collection.
+- `capped`: the dictionary will only contain the last _n_ values inserted
+- `preloadMode`: controls how documents are fetched from the collection during preloading. Accepted values:
+  - `"scan"` (default): traverses the entire collection. Reliable but can be slow on very large or sharded collections.
+  - `"sample"`: uses MongoDB's [`$sample`](https://www.mongodb.com/docs/manual/reference/operator/aggregation/sample/) aggregation stage to draw a random subset of `number` documents. Significantly faster on large collections, at the cost of the preloaded library potentially containing fewer than `number` distinct values after deduplication (if `preloadUnique` is also `true`). Not applicable to compound fields, where `$sample` is used unconditionally when this mode is set.
+- `preloadUnique`: whether to deduplicate preloaded values using a `$group` stage (default: `true`). Set to `false` to skip deduplication, which avoids the cost of a blocking `$group` across all scanned documents. Duplicate values may appear in the preloaded library, but values are picked at random so the practical impact is usually negligible. Not applicable to compound fields.
 
 Compounding is useful when you want to run complex queries and still ensure they do match some existing records. For example, with the following template:
 ```
