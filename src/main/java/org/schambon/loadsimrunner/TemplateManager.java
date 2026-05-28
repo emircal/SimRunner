@@ -260,13 +260,15 @@ public class TemplateManager {
                 continue;
             }
 
+            var preloadStart = System.currentTimeMillis();
             var preloadedValues = RememberUtil.preloadValues(rfield, mongoColl);
+            var preloadElapsed = System.currentTimeMillis() - preloadStart;
 
             var values = remembrances.get(rfield.name);
             values.addAll(preloadedValues);
 
-            reporter.reportInit(String.format("\tLoaded %d existing keys for field: %s (refer as #%s)", values.size(),
-                    rfield.getDescription(), rfield.name));
+            reporter.reportInit(String.format("\tLoaded %d existing keys for field: %s (refer as #%s) in %d ms", values.size(),
+                    rfield.getDescription(), rfield.name, preloadElapsed));
 
         }
     }
