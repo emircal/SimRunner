@@ -35,19 +35,37 @@ public class Report {
     }
 
     private String workloadReport(String name, Document wlReport) {
-        return String.format("%s:\n==========\n%d ops per second (%d total)\n%d records per second (%d total)\n%f ms mean duration\npercentiles: %s\n%f / %f / %f Batch size avg / min / max\n[util %%: %f -- report computed in %d]",
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format(
+            "%s:\n==========\n%d ops per second (%d total)\n%d records per second (%d total)\n%f ms mean duration",
             name,
             wlReport.getLong("ops"), wlReport.getLong("total ops"),
             wlReport.getLong("records"), wlReport.getLong("total records"),
-            wlReport.getDouble("mean duration"),
+            wlReport.getDouble("mean duration")
+        ));
+
+        // Latency breakdown — only present when DriverMetricsCollector is active.
+        if (wlReport.containsKey("mean command time")) {
+            sb.append(String.format(
+                "\n  breakdown: pool wait %.3f ms | command time (net+svr) %.3f ms | driver overhead %.3f ms",
+                wlReport.getDouble("mean pool wait"),
+                wlReport.getDouble("mean command time"),
+                wlReport.getDouble("mean driver overhead")
+            ));
+        }
+
+        sb.append(String.format(
+            "\npercentiles: %s\n%f / %f / %f Batch size avg / min / max\n[util %%: %f -- report computed in %d]",
             percentilesToString((List<Document>) wlReport.get("percentiles")),
             wlReport.getDouble("mean batch size"),
             wlReport.getDouble("min batch size"),
             wlReport.getDouble("max batch size"),
             wlReport.getDouble("client util"),
             wlReport.getLong("report compute time")
-        );
-    } 
+        ));
+
+        return sb.toString();
+    }
 
     private String percentilesToString(List<Document> list) {
         return list.stream().map(doc -> String.format("P%d: %d", doc.getInteger("p"), doc.getLong("value"))).collect(Collectors.toList()).toString();

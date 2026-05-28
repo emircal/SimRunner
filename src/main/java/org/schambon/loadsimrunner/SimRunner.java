@@ -19,6 +19,7 @@ import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.bson.Document;
+import org.schambon.loadsimrunner.client.DriverMetricsCollector;
 import org.schambon.loadsimrunner.client.EnhancedMongoClientHelper;
 import org.schambon.loadsimrunner.errors.InvalidConfigException;
 import org.schambon.loadsimrunner.http.HttpServer;
@@ -130,7 +131,12 @@ public class SimRunner {
             // bit ugly: we have to drop collections before initialising the main MongoClient since it can create encrypted collections, which would error out if they already exist
             dropCollectionsIfNecessary(connectionString, (List<Document>) config.get("templates"));
 
-            this.client = EnhancedMongoClientHelper.client(connectionString, (Document) config.get("tlsOptions"), (Document) config.get("encryption"));
+            // Create and wire the driver metrics collector so the Reporter can break down
+            // latency into: pool wait | command round-trip (net + server) | driver overhead.
+            DriverMetricsCollector metricsCollector = new DriverMetricsCollector();
+            reporter.setDriverMetricsCollector(metricsCollector);
+
+            this.client = EnhancedMongoClientHelper.client(connectionString, (Document) config.get("tlsOptions"), (Document) config.get("encryption"), metricsCollector);
 
             Document commandResult = client.getDatabase("admin").runCommand(new Document("isMaster", 1));
             if (!commandResult.getBoolean("ismaster")) {

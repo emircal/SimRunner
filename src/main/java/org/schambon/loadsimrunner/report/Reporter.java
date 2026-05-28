@@ -14,6 +14,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.bson.Document;
+import org.schambon.loadsimrunner.client.DriverMetricsCollector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,8 +30,24 @@ public class Reporter {
     private TreeMap<Instant, Report> reports = new TreeMap<>();
     private List<Integer> percentiles;
 
+    /**
+     * Optional driver metrics collector. When set, reportOp() reads the per-thread
+     * command time and pool-wait accumulators immediately after each database
+     * operation and forwards them to the StatsHolder for breakdown reporting.
+     */
+    private DriverMetricsCollector driverMetrics = null;
+
     public Reporter(List<Integer> reportPercentiles) {
         this.percentiles = reportPercentiles;
+    }
+
+    /**
+     * Registers the driver metrics collector. Must be called before start().
+     * The collector must already be registered on the MongoClient as both a
+     * CommandListener and a ConnectionPoolListener.
+     */
+    public void setDriverMetricsCollector(DriverMetricsCollector collector) {
+        this.driverMetrics = collector;
     }
 
     public void start() {
@@ -84,13 +101,21 @@ public class Reporter {
     }
 
     public synchronized void reportOp(String name, long i, long duration) {
-        //LOGGER.debug("Reported {} {} {}", name, i, duration);
         StatsHolder h = stats.get(name);
         if (h == null) {
             h = new StatsHolder();
             stats.put(name, h);
         }
-        h.addOp(i, duration);
+
+        if (driverMetrics != null) {
+            // Read and reset the thread-local accumulators that the driver listeners
+            // populated during the blocking database call that just completed.
+            double commandTimeMs = driverMetrics.getAndClearCommandTimeMs();
+            double poolWaitMs    = driverMetrics.getAndClearPoolWaitMs();
+            h.addOp(i, duration, commandTimeMs, poolWaitMs);
+        } else {
+            h.addOp(i, duration);
+        }
     }
 
     public Collection<Report> getAllReports() {
@@ -107,9 +132,12 @@ public class Reporter {
     private static class StatsHolder {
 
         AtomicLong numops = new AtomicLong(0);
-        // List<Long> durationsBatch = new ArrayList<>();
         TreeMultiset<Long> durationsBatch = TreeMultiset.create();
         List<Long> numbers = new ArrayList<>();
+
+        // Breakdown fields — only populated when DriverMetricsCollector is active.
+        List<Double> commandTimes = new ArrayList<>();
+        List<Double> poolWaits    = new ArrayList<>();
 
         // Compute some statistics
         // interval is the overall duration
@@ -131,13 +159,6 @@ public class Reporter {
                 long pctVal = durations.get(index);
                 computedPercentiles.add(new Document("p", _p).append("value", pctVal));
             }
-
-            // var ninetyFifthIndex = (int)Math.ceil(.95d * (double)durations.size());
-            // if (ninetyFifthIndex >= durations.size()) {
-            //     ninetyFifthIndex = Math.max(0, durations.size()-1);
-            // }
-            // long ninetyFifth = durations.get(ninetyFifthIndex);
-            // long fiftieth = durations.size() > 1 ? durations.get(durations.size()/2) : 0;
 
             Stats batchStats = Stats.of(durations);
             var meanBatch = batchStats.mean();
@@ -165,13 +186,42 @@ public class Reporter {
             wlReport.append("client util", util);
             wlReport.append("report compute time", currentTimeMillis() - __startCompute);
 
-            return wlReport;
+            // Latency breakdown — only included when driver metrics are available.
+            if (!commandTimes.isEmpty()) {
+                Stats cmdStats  = Stats.of(commandTimes);
+                Stats poolStats = Stats.of(poolWaits);
+                double meanCmd  = cmdStats.mean();
+                double meanPool = poolStats.mean();
+                // Driver overhead = everything not accounted for by the pool wait or
+                // the command round-trip (e.g. minor driver bookkeeping). Can be slightly
+                // negative due to clock resolution differences; clamp to 0.
+                double meanOverhead = Math.max(0.0, meanBatch - meanCmd - meanPool);
+                wlReport.append("mean command time", meanCmd);
+                wlReport.append("mean pool wait", meanPool);
+                wlReport.append("mean driver overhead", meanOverhead);
+            }
 
+            return wlReport;
         }
 
+        /** Called when driver metrics are NOT available. */
         public void addOp(long number, long duration) {
             numops.incrementAndGet();
-            Reporter.asyncExecutor.submit(() ->  {durationsBatch.add(duration); numbers.add(number);});
+            Reporter.asyncExecutor.submit(() -> {
+                durationsBatch.add(duration);
+                numbers.add(number);
+            });
+        }
+
+        /** Called when driver metrics ARE available. */
+        public void addOp(long number, long duration, double commandTimeMs, double poolWaitMs) {
+            numops.incrementAndGet();
+            Reporter.asyncExecutor.submit(() -> {
+                durationsBatch.add(duration);
+                numbers.add(number);
+                commandTimes.add(commandTimeMs);
+                poolWaits.add(poolWaitMs);
+            });
         }
     }
 }

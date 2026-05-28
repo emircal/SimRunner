@@ -9,6 +9,9 @@
         <div>
             <canvas id="duration"></canvas>
         </div>
+        <div id="breakdown-container" style="display:none">
+            <canvas id="breakdown"></canvas>
+        </div>
         <div id="message"></div>
         <div>
             <button><a href="/download">Download as CSV</a></button>
@@ -18,6 +21,10 @@
             const COLOURS = ["rgb(255, 99, 132)", "rgb(132, 132, 255)", "rgb(132, 255, 132)", "rgb(99, 132, 255)"];
             // duration colours: same but darker
             const DURATION_COLOURS = ["rgb(155,0,32)", "rgb(32,32,150)", "rgb(32,150,32)", "rgb(0,32,150)"];
+            // breakdown colours: command time (solid), pool wait (dashed), overhead (dotted)
+            const BREAKDOWN_CMD_COLOURS  = ["rgb(220,50,50)",  "rgb(50,50,220)",  "rgb(50,180,50)",  "rgb(180,130,0)"];
+            const BREAKDOWN_POOL_COLOURS = ["rgb(255,140,0)",  "rgb(0,180,180)",  "rgb(150,220,80)", "rgb(200,100,200)"];
+            const BREAKDOWN_OVH_COLOURS  = ["rgb(160,160,160)","rgb(120,120,200)","rgb(100,180,100)","rgb(180,180,80)"];
 
             const MAXPOINTS = 1800;
 
@@ -31,6 +38,42 @@
                     }
                 }
 
+                return res;
+            }
+
+            /**
+             * Builds datasets for the latency breakdown chart.
+             * Returns three series per workload: command time, pool wait, driver overhead.
+             * Returns an empty array if breakdown fields are absent from the report.
+             */
+            function loadBreakdownData(names, data) {
+                const firstReport = data[0].report;
+                if (!names.some(n => n in firstReport && "mean command time" in firstReport[n])) {
+                    return [];
+                }
+                let res = [];
+                names.forEach((name, i) => {
+                    res.push({
+                        label: `${name} (command time)`,
+                        data: data.map(r => name in r.report ? (r.report[name]["mean command time"] || 0) : 0),
+                        borderColor: BREAKDOWN_CMD_COLOURS[i % BREAKDOWN_CMD_COLOURS.length],
+                        backgroundColor: BREAKDOWN_CMD_COLOURS[i % BREAKDOWN_CMD_COLOURS.length]
+                    });
+                    res.push({
+                        label: `${name} (pool wait)`,
+                        data: data.map(r => name in r.report ? (r.report[name]["mean pool wait"] || 0) : 0),
+                        borderColor: BREAKDOWN_POOL_COLOURS[i % BREAKDOWN_POOL_COLOURS.length],
+                        backgroundColor: BREAKDOWN_POOL_COLOURS[i % BREAKDOWN_POOL_COLOURS.length],
+                        borderDash: [6, 4]
+                    });
+                    res.push({
+                        label: `${name} (driver overhead)`,
+                        data: data.map(r => name in r.report ? (r.report[name]["mean driver overhead"] || 0) : 0),
+                        borderColor: BREAKDOWN_OVH_COLOURS[i % BREAKDOWN_OVH_COLOURS.length],
+                        backgroundColor: BREAKDOWN_OVH_COLOURS[i % BREAKDOWN_OVH_COLOURS.length],
+                        borderDash: [2, 4]
+                    });
+                });
                 return res;
             }
 
@@ -124,6 +167,28 @@
                             configDuration
                         );
 
+                        // Latency breakdown chart — only rendered when breakdown fields are present.
+                        const datasetsBreakdown = loadBreakdownData(dsNames, data);
+                        let breakdownChart = null;
+                        if (datasetsBreakdown.length > 0) {
+                            document.getElementById("breakdown-container").style.display = "";
+                            const configBreakdown = {
+                                type: "line",
+                                data: { labels, datasets: datasetsBreakdown },
+                                options: {
+                                    responsive: true,
+                                    plugins: {
+                                        legend: { position: "top" },
+                                        title: {
+                                            display: true,
+                                            text: "Latency Breakdown (mean ms): command time (net+svr) | pool wait | driver overhead"
+                                        }
+                                    }
+                                }
+                            };
+                            breakdownChart = new Chart(document.getElementById("breakdown"), configBreakdown);
+                        }
+
                         let last_time = data[data.length - 1].time;
 
                         const refresh = function() {
@@ -158,11 +223,24 @@
                                                 }
                                             });
                                         };
+                                        // Helper to push a single breakdown field for one workload.
+                                        const updateBreakdown = function(i, field, seriesOffset) {
+                                            if (!breakdownChart) return;
+                                            const name = dsNames[i];
+                                            // Each workload occupies 3 consecutive series (cmd, pool, overhead).
+                                            const dsIdx = i * 3 + seriesOffset;
+                                            newdata.map(r => name in r.report ? (r.report[name][field] || 0) : 0)
+                                                   .forEach(x => datasetsBreakdown[dsIdx].data.push(x));
+                                        };
+
                                         for (let i = 0; i < dsNames.length; i++) {
                                             updateData(i, "ops", 0, datasetsNumber);
                                             updateData(i, "records", 1, datasetsNumber);
                                             updateData(i, "mean duration", 0, datasetsDuration);
                                             updatePercentiles(i, datasetsDuration);
+                                            updateBreakdown(i, "mean command time",   0);
+                                            updateBreakdown(i, "mean pool wait",       1);
+                                            updateBreakdown(i, "mean driver overhead", 2);
                                         }
 
                                         if (labels.length > MAXPOINTS) {
@@ -174,11 +252,18 @@
 
                                                 datasetsDuration[i].data.splice(0, todelete);
                                                 datasetsDuration[i + dsNames.length].data.splice(0, todelete);
+
+                                                if (breakdownChart) {
+                                                    datasetsBreakdown[i * 3 + 0].data.splice(0, todelete);
+                                                    datasetsBreakdown[i * 3 + 1].data.splice(0, todelete);
+                                                    datasetsBreakdown[i * 3 + 2].data.splice(0, todelete);
+                                                }
                                             }
                                         }
 
                                         numberChart.update("none");
                                         durationChart.update("none");
+                                        if (breakdownChart) breakdownChart.update("none");
                                     }
                                 });
 

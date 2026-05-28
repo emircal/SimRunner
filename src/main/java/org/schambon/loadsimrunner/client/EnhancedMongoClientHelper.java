@@ -45,13 +45,13 @@ public class EnhancedMongoClientHelper {
     private static final Logger LOGGER = LoggerFactory.getLogger(EnhancedMongoClientHelper.class);
     
     public static void doInTemporaryClient(String uri, TaskWithClient task) {
-        try (var client = MongoClients.create(buildClientSettings(uri, null, null))) {
+        try (var client = MongoClients.create(buildClientSettings(uri, null, null, null))) {
             task.run(client);
         }
     }
 
     public static void doInTemporaryClient(String uri, Document tlsConfig, TaskWithClient task) {
-        try (var client = MongoClients.create(buildClientSettings(uri, tlsConfig, null))) {
+        try (var client = MongoClients.create(buildClientSettings(uri, tlsConfig, null, null))) {
             task.run(client);
         }
     }
@@ -68,7 +68,7 @@ public class EnhancedMongoClientHelper {
      * @return Configured MongoClient
      */
     public static MongoClient client(String uri, Document encryption) {
-        return client(uri, null, encryption);
+        return client(uri, null, encryption, null);
     }
 
     /**
@@ -80,8 +80,23 @@ public class EnhancedMongoClientHelper {
      * @return Configured MongoClient
      */
     public static MongoClient client(String uri, Document tlsConfig, Document encryption) {
-        MongoClientSettings settings = buildClientSettings(uri, tlsConfig, encryption);
-        
+        return client(uri, tlsConfig, encryption, null);
+    }
+
+    /**
+     * Creates a MongoClient with enhanced connection support, database-specific configuration,
+     * and optional driver-level metrics collection.
+     *
+     * @param uri            Connection string (mongodb:// for DocumentDB, mongodb+srv:// for MongoDB Atlas)
+     * @param tlsConfig      TLS-specific configuration including certificate settings (optional)
+     * @param encryption     Encryption configuration (optional)
+     * @param metricsCollector Driver metrics collector to register as CommandListener and
+     *                         ConnectionPoolListener (optional; pass null to disable)
+     * @return Configured MongoClient
+     */
+    public static MongoClient client(String uri, Document tlsConfig, Document encryption, DriverMetricsCollector metricsCollector) {
+        MongoClientSettings settings = buildClientSettings(uri, tlsConfig, encryption, metricsCollector);
+
         if (!isOn(encryption)) {
             return MongoClients.create(settings);
         } else {
@@ -92,7 +107,7 @@ public class EnhancedMongoClientHelper {
     /**
      * Builds MongoClientSettings based on connection string type and configuration
      */
-    private static MongoClientSettings buildClientSettings(String uri, Document tlsConfig, Document encryption) {
+    private static MongoClientSettings buildClientSettings(String uri, Document tlsConfig, Document encryption, DriverMetricsCollector metricsCollector) {
         ConnectionString connectionString = new ConnectionString(uri);
         MongoClientSettings.Builder settingsBuilder = MongoClientSettings.builder()
             .applyConnectionString(connectionString)
@@ -106,6 +121,12 @@ public class EnhancedMongoClientHelper {
             if (tlsConfig != null) {
                 applyCustomTLSSettings(settingsBuilder, tlsConfig);
             }
+        }
+
+        if (metricsCollector != null) {
+            settingsBuilder.addCommandListener(metricsCollector);
+            settingsBuilder.applyToConnectionPoolSettings(b -> b.addConnectionPoolListener(metricsCollector));
+            LOGGER.info("Driver metrics collection enabled (CommandListener + ConnectionPoolListener registered)");
         }
 
         return settingsBuilder.build();
@@ -271,8 +292,8 @@ public class EnhancedMongoClientHelper {
             keyVaultUri = uri;
         }
 
-        // Build key vault client settings with same TLS configuration
-        var keyVaultSettings = buildClientSettings(keyVaultUri, tlsConfig, null);
+        // Build key vault client settings with same TLS configuration (no metrics needed)
+        var keyVaultSettings = buildClientSettings(keyVaultUri, tlsConfig, null, null);
         var clientEncryptionSettings = ClientEncryptionSettings.builder()
             .keyVaultMongoClientSettings(keyVaultSettings)
             .keyVaultNamespace(encryption.getString("keyVaultNamespace"))
