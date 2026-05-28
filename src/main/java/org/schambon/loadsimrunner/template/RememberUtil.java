@@ -26,9 +26,11 @@ public class RememberUtil {
                 return new RememberField(doc.getString("field"), doc.getList("compound", String.class),
                         doc.getString("name"), doc.getBoolean("preload", true),
                         doc.getInteger("number", TemplateManager.DEFAULT_NUMBER_TO_PRELOAD),
-                        doc.getInteger("capped", -1));
+                        doc.getInteger("capped", -1),
+                        doc.getString("preloadMode") != null ? doc.getString("preloadMode") : "scan",
+                        doc.getBoolean("preloadUnique", true));
             } else {
-                return new RememberField((String) i, null, null, true, TemplateManager.DEFAULT_NUMBER_TO_PRELOAD, -1);
+                return new RememberField((String) i, null, null, true, TemplateManager.DEFAULT_NUMBER_TO_PRELOAD, -1, "scan", true);
             }
         }).collect(Collectors.toList());
     }
@@ -135,8 +137,20 @@ public class RememberUtil {
 
         var pipeline = new ArrayList<Document>();
 
-        pipeline.add(new Document("$group", new Document("_id", String.format("$%s", rfield.field))));
-        pipeline.add(new Document("$limit", rfield.number));
+        if ("sample".equals(rfield.preloadMode)) {
+            pipeline.add(new Document("$sample", new Document("size", rfield.number)));
+        }
+
+        if (rfield.preloadUnique) {
+            pipeline.add(new Document("$group", new Document("_id", String.format("$%s", rfield.field))));
+            pipeline.add(new Document("$limit", rfield.number));
+        } else {
+            var projection = new Document("_id", 0).append(rfield.field, 1);
+            pipeline.add(new Document("$project", projection));
+            if (!"sample".equals(rfield.preloadMode)) {
+                pipeline.add(new Document("$limit", rfield.number));
+            }
+        }
 
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug("Preload pipeline is {}", pipeline);
@@ -144,12 +158,18 @@ public class RememberUtil {
 
         var values = new ArrayList<Object>();
 
-        for (var result : mongoColl.aggregate(pipeline).allowDiskUse(true)) {
-            values.addAll(
-                RememberUtil.recurseUnwind(result.get("_id"))
-            );
+        if (rfield.preloadUnique) {
+            for (var result : mongoColl.aggregate(pipeline).allowDiskUse(true)) {
+                values.addAll(
+                    RememberUtil.recurseUnwind(result.get("_id"))
+                );
+            }
+        } else {
+            for (var result : mongoColl.aggregate(pipeline)) {
+                values.addAll(extractRememberedValues(result, rfield));
+            }
         }
-        
+
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug("Preloaded values for {}:", rfield.name);
             for (var v : values) {
@@ -166,10 +186,18 @@ public class RememberUtil {
         for (var key: rfield.compound) {
             projection.append(key, 1);
         }
-        pipeline.add(new Document("$project", projection));
-        pipeline.add(new Document("$limit", rfield.number));
 
-        if (LOGGER.isDebugEnabled()) LOGGER.debug("Slow preload pipeline is {}}", pipeline);
+        if ("sample".equals(rfield.preloadMode)) {
+            pipeline.add(new Document("$sample", new Document("size", rfield.number)));
+        }
+
+        pipeline.add(new Document("$project", projection));
+
+        if (!"sample".equals(rfield.preloadMode)) {
+            pipeline.add(new Document("$limit", rfield.number));
+        }
+
+        if (LOGGER.isDebugEnabled()) LOGGER.debug("Slow preload pipeline is {}", pipeline);
 
         var values = new ArrayList<Object>();
         for (var result: mongoColl.aggregate(pipeline)) {

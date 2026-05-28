@@ -10,8 +10,10 @@ public class RememberField {
     public String name;
     public int number;
     public int capped = -1;
+    public String preloadMode = "scan";
+    public boolean preloadUnique = true;
 
-    public RememberField(String field, List<String> compound, String name, boolean preload, int number, int capped) {
+    public RememberField(String field, List<String> compound, String name, boolean preload, int number, int capped, String preloadMode, boolean preloadUnique) {
         this.field = field;
         this.preload = preload;
         if (compound == null) {
@@ -26,6 +28,8 @@ public class RememberField {
         }
         this.number = number;
         this.capped = capped;
+        this.preloadMode = preloadMode;
+        this.preloadUnique = preloadUnique;
     }
 
     // compound trumps field, basically
